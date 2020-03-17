@@ -11,11 +11,15 @@
 key_t key;
 key_t key1;
 key_t key2;
+key_t key3;
 
 int shmid ;
 int shmid1 ;
 int shmid2 ;
+int shmid3;
 
+
+int i = 0;
 
 char *data;
 char *send_memory;
@@ -26,17 +30,35 @@ int cond=1;
 
 pthread_t thread;
 
-
+typedef struct
+{
+	char *msglist[20];
+}msg;
+volatile msg *arr;
 void sigintHandler(int sig_num){
 	fflush(stdout);
 	printf("!!!!exiting!!!!\n");
 	cond=0;
 	shmdt(data);
-	// shmdt(send_memory);
 	shmctl(shmid,IPC_RMID,NULL);
 	shmctl(shmid1,IPC_RMID,NULL);
 	pthread_join(thread,NULL);
 	exit(0);
+}
+
+void enqueue(char * msg){
+	i=i%20;
+	arr->msglist[i++]=msg;
+}
+
+void show(){
+	int j=0;
+	printf("------------------------------------\n");
+	while(j<i){
+		printf("%d: %s\n", j, arr->msglist[j]);
+		j++;
+	}
+	printf("------------------------------------\n");
 }
 
 void *receive(){
@@ -46,14 +68,15 @@ void *receive(){
             continue;
         }
 		fflush(stdout);
-	    printf("Data RECEIVED: %s\n",receive_memory);
+		enqueue(receive_memory);
+	    printf("%s",receive_memory);
         strncpy(other,receive_memory,100);
     }
 }
 
 
-
 int main(){
+
 	signal(SIGINT, sigintHandler);
 	key=1000;
 	shmid = shmget(key,1024,0666|IPC_CREAT);
@@ -66,6 +89,10 @@ int main(){
 	key2 = key1+1;
 	shmid2 = shmget(key2,1024,0666|IPC_CREAT);
 	receive_memory = (char*) shmat(shmid2,(void*)0,0);
+
+	key3 = 1003;
+	shmid3 = shmget(key3, 1024, 0666 | IPC_CREAT);
+	arr = shmat(shmid3, (void *)0, 0);
 
 	fflush(stdout);
 	printf("Enter Your name: ");
@@ -80,8 +107,21 @@ int main(){
 
 	pthread_create(&thread, NULL, receive, NULL );
 
+	char *temp=(char*)malloc(sizeof(char)*100);
+
 	while (1){
-		fgets(send_memory,100,stdin);
+		fgets(temp,100,stdin);
+		if (memcmp(temp, "show", 4) == 0 || memcmp(temp, "SHOW", 4) == 0)
+		{
+			show();
+			continue;
+		}
+		else if (memcmp(temp, "exit", 4) == 0 || memcmp(temp, "EXIT", 4) == 0)
+		{
+			sprintf(send_memory, "client exiting");
+				sigintHandler(0);
+		}
+		sprintf(send_memory, "%s", temp);
 	}
 
 	return 0;
