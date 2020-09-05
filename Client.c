@@ -7,16 +7,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <sys/stat.h>
-#include <sys/sendfile.h>
-#include <fcntl.h>
-
 #define IP_PROTOCOL 0
 #define IP_ADDRESS "127.0.0.1" // localhost
 #define PORT_NO 15050
 #define NET_BUF_SIZE 32
 #define sendrecvflag 0
-#define FILENAME "a1.txt"
 
 void clearBuf(char *b)
 {
@@ -52,7 +47,7 @@ int main()
 	char net_buf[NET_BUF_SIZE];
 	FILE *fp;
 
-	sockfd = socket(AF_INET, SOCK_STREAM, IP_PROTOCOL);
+	sockfd = socket(AF_INET, SOCK_DGRAM, IP_PROTOCOL);
 
 	if (sockfd < 0)
 		perror("Could not create socket");
@@ -66,18 +61,11 @@ int main()
 		sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
 
 		printf("\n---------Data Received---------\n");
-		int file_size, file_desc;
-		recv(sockfd, &file_size, sizeof(int), 0);
-		char *data = malloc(file_size);
-		file_desc = open(FILENAME, O_CREAT | O_EXCL | O_WRONLY, 0666);
-		recv(sockfd, data, file_size, 0);
-		write(file_desc, data, file_size);
-		close(file_desc);
 
-		// clearBuf(net_buf);
-		// nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
+		clearBuf(net_buf);
+		nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
 
-		// printContents(net_buf, NET_BUF_SIZE);
+		printContents(net_buf, NET_BUF_SIZE);
 
 		printf("\n-------------------------------\n");
 	}

@@ -6,13 +6,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/sendfile.h>
-
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <stdbool.h>
-#include <pthread.h>
 
 #define IP_PROTOCOL 0
 #define PORT_NO 15050
@@ -60,7 +53,7 @@ int main()
 	char net_buf[NET_BUF_SIZE];
 	FILE *fp;
 
-	sockfd = socket(AF_INET, SOCK_STREAM, IP_PROTOCOL);
+	sockfd = socket(AF_INET, SOCK_DGRAM, IP_PROTOCOL);
 
 	if (sockfd < 0)
 		printf("\nfile descriptor not received!!\n");
@@ -76,7 +69,7 @@ int main()
 
 		nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
 
-		int file = open(net_buf, O_RDONLY);
+		fp = fopen(net_buf, "r");
 		printf("\nFile Requested by Client: %s\n", net_buf);
 
 		if (fp == NULL)
@@ -84,19 +77,14 @@ int main()
 		else
 		{
 			printf("File Successfully Found!\n");
-			struct stat obj;
-			stat(net_buf, &obj);
-			int file_size = obj.st_size;
-			send(sockfd, &file_size, sizeof(int), 0);
-			sendfile(sockfd, file, NULL, file_size);
 
-			// copyContents(fp, net_buf, NET_BUF_SIZE);
+			copyContents(fp, net_buf, NET_BUF_SIZE);
 
-			// sendto(sockfd, net_buf, NET_BUF_SIZE,  sendrecvflag,  (struct sockaddr *)&addr_con, addrlen);
+			sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
 
 			clearBuf(net_buf);
 
-			// fclose(fp);
+			fclose(fp);
 		}
 	}
 	return 0;
