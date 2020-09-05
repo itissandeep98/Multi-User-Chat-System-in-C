@@ -1,128 +1,85 @@
-
-#include <sys/ipc.h>
-#include <sys/shm.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<pthread.h>
-#include<signal.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-key_t key;
-key_t key1;
-key_t key2;
-key_t key3;
+#include <sys/stat.h>
+#include <sys/sendfile.h>
+#include <fcntl.h>
 
-int shmid ;
-int shmid1 ;
-int shmid2 ;
-int shmid3;
+#define IP_PROTOCOL 0
+#define IP_ADDRESS "127.0.0.1" // localhost
+#define PORT_NO 15050
+#define NET_BUF_SIZE 32
+#define sendrecvflag 0
+#define FILENAME "a1.txt"
 
-
-int i = 0;
-
-char *data;
-char *send_memory;
-char *receive_memory;
-char other[100];
-char name[20];
-int cond=1;
-
-pthread_t thread;
-
-typedef struct
+void clearBuf(char *b)
 {
-	char *msglist[20];
-}msg;
-volatile msg *arr;
-void sigintHandler(int sig_num){
-	fflush(stdout);
-	printf("!!!!exiting!!!!\n");
-	cond=0;
-	shmdt(data);
-	shmctl(shmid,IPC_RMID,NULL);
-	shmctl(shmid1,IPC_RMID,NULL);
-	pthread_join(thread,NULL);
-	exit(0);
+	int i;
+	for (i = 0; i < NET_BUF_SIZE; i++)
+		b[i] = '\0';
 }
 
-void enqueue(char * msg){
-	i=i%20;
-	arr->msglist[i++]=msg;
-}
-
-void show(){
-	int j=0;
-	printf("------------------------------------\n");
-	while(j<i){
-		printf("%d: %s\n", j, arr->msglist[j]);
-		j++;
+int printContents(char *buf, int s)
+{
+	int i;
+	char ch;
+	for (i = 0; i < s; i++)
+	{
+		ch = buf[i];
+		if (ch == EOF)
+			return 1;
+		else
+			printf("%c", ch);
 	}
-	printf("------------------------------------\n");
+	return 0;
 }
 
-void *receive(){
-	strncpy(other,receive_memory,100);
-	while(cond){
-        if(strcmp(other,receive_memory)==0){
-            continue;
-        }
-		fflush(stdout);
-		enqueue(receive_memory);
-	    printf("%s",receive_memory);
-        strncpy(other,receive_memory,100);
-    }
-}
+int main()
+{
+	int sockfd, nBytes;
+	struct sockaddr_in addr_con;
+	int addrlen = sizeof(addr_con);
 
+	addr_con.sin_family = AF_INET;
+	addr_con.sin_port = htons(PORT_NO);
+	addr_con.sin_addr.s_addr = inet_addr(IP_ADDRESS);
+	char net_buf[NET_BUF_SIZE];
+	FILE *fp;
 
-int main(){
+	sockfd = socket(AF_INET, SOCK_STREAM, IP_PROTOCOL);
 
-	signal(SIGINT, sigintHandler);
-	key=1000;
-	shmid = shmget(key,1024,0666|IPC_CREAT);
-	data = (char*) shmat(shmid,(void*)0,0);
+	if (sockfd < 0)
+		perror("Could not create socket");
+	else
+		printf("\nfile descriptor %d received\n", sockfd);
 
-	key1 = getpid();
-	shmid1 = shmget(key1,1024,0666|IPC_CREAT);
-	send_memory = (char*) shmat(shmid1,(void*)0,0);
+	while (1)
+	{
+		printf("\nPlease enter file name to receive:\n");
+		scanf("%s", net_buf);
+		sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
 
-	key2 = key1+1;
-	shmid2 = shmget(key2,1024,0666|IPC_CREAT);
-	receive_memory = (char*) shmat(shmid2,(void*)0,0);
+		printf("\n---------Data Received---------\n");
+		int file_size, file_desc;
+		recv(sockfd, &file_size, sizeof(int), 0);
+		char *data = malloc(file_size);
+		file_desc = open(FILENAME, O_CREAT | O_EXCL | O_WRONLY, 0666);
+		recv(sockfd, data, file_size, 0);
+		write(file_desc, data, file_size);
+		close(file_desc);
 
-	key3 = 1003;
-	shmid3 = shmget(key3, 1024, 0666 | IPC_CREAT);
-	arr = shmat(shmid3, (void *)0, 0);
+		// clearBuf(net_buf);
+		// nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
 
-	fflush(stdout);
-	printf("Enter Your name: ");
-	fgets(name,20,stdin);
-	name[strlen(name)]=' ';
-    name[strcspn(name,"\n")]=0;
+		// printContents(net_buf, NET_BUF_SIZE);
 
-	sprintf(data,"%s %d",name,key1);
-	fflush(stdout);
-	printf("Successful Connection %s \n",data);
-
-
-	pthread_create(&thread, NULL, receive, NULL );
-
-	char *temp=(char*)malloc(sizeof(char)*100);
-
-	while (1){
-		fgets(temp,100,stdin);
-		if (memcmp(temp, "show", 4) == 0 || memcmp(temp, "SHOW", 4) == 0)
-		{
-			show();
-			continue;
-		}
-		else if (memcmp(temp, "exit", 4) == 0 || memcmp(temp, "EXIT", 4) == 0)
-		{
-			sprintf(send_memory, "client exiting");
-				sigintHandler(0);
-		}
-		sprintf(send_memory, "%s", temp);
+		printf("\n-------------------------------\n");
 	}
-
 	return 0;
 }

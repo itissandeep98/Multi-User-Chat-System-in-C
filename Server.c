@@ -1,222 +1,103 @@
-#include <sys/ipc.h>
-#include <sys/shm.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<pthread.h>
-#include<ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <sys/types.h>
-#include<signal.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/sendfile.h>
 
-key_t key;
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdbool.h>
+#include <pthread.h>
 
-int shmid ;
+#define IP_PROTOCOL 0
+#define PORT_NO 15050
+#define NET_BUF_SIZE 32
+#define sendrecvflag 0
+#define nofile "File Not Found!"
 
-char *clientdata;
-char prevClient[100]; 
-char** parsed;
-
-int ind=0;
-
-int clientCount = 0;
-pthread_mutex_t lock;
-
-pthread_t thread[1024];
-
-int cond=1;
-
-typedef struct
+void clearBuf(char *b)
 {
-	char *msglist[20];
-} msg;
-volatile msg *arr;
-struct client{
-	char name[20];
-	int key;
-	int index;
-};
-
-struct client Client[100];
-
-void enqueue(char *msg)
-{
-	ind = ind % 20;
-	arr->msglist[ind++] = msg;
+	int i;
+	for (i = 0; i < NET_BUF_SIZE; i++)
+		b[i] = '\0';
 }
 
-void show()
+int copyContents(FILE *fp, char *buf, int s)
 {
-	int j = 0;
-	printf("------------------------------------\n");
-	while (j < ind)
+	int i, len;
+	if (fp == NULL)
 	{
-		printf("%d: %s\n", j, arr->msglist[j]);
-		j++;
+		strcpy(buf, nofile);
+		len = strlen(nofile);
+		buf[len] = EOF;
+		return 1;
 	}
-	printf("------------------------------------\n");
-}
-void sigintHandler(int sig_num){
-	fflush(stdout);
-	printf("exiting\n");
-	cond=0;
-	shmdt(clientdata);
-	shmctl(shmid,IPC_RMID,NULL);
-	for(int i = 0 ; i < clientCount ; i ++)
-		pthread_join(thread[i],NULL);
 
-	pthread_mutex_destroy(&lock);
-
-	exit(0);
-
-}
-
-char **parse(char* input){
-    char** arr = (char**) malloc(sizeof(char*)*100);
-    for(int i=0; i<100; ++i){
-        arr[i]= (char*) malloc(sizeof(char)*100);
-    }
-    int i=0,j=0,k=0;
-    while(*(input+i) !='\0'){
-        if(*(input+i)!=' '){
-            arr[j][k]=input[i];
-            k+=1;
-        }
-        else if(*(input+i)==' ' && isspace(*(input+i+1))==0){
-            j+=1;
-            k=0;
-        }
-        i+=1;
-    }
-    arr[j+1]=NULL;
-    return arr;
-}
-
-void send_to_client(int index,char * msg){
-	int shmid_receiver=shmget((key_t)Client[index].key+1,1024,0666|IPC_CREAT);
-	char * data_to_send=(char*) shmat(shmid_receiver,(void*)0,0);
-	strncpy(data_to_send,msg,100);
-}
-
-void * networking(void * ClientDetail){
-	struct client* clientDetail = (struct client*) ClientDetail;
-
-	key_t key1=clientDetail->key;
-	int shmid1 = shmget(key1,1024,0666|IPC_CREAT);
-	char* msg=(char*) shmat(shmid1,(void*)0,0);
-
-	char prevmsg[100];
-
-	strncpy(prevmsg,msg,100);
-
-	while(cond){
-        if(strcmp(prevmsg,msg)==0){
-            continue;
-        }
-		pthread_mutex_lock(&lock);
-		enqueue(msg);
-		
-
-		fflush(stdout);
-	    printf(">>>Data read from Client %d: %s\n",clientDetail->index,msg);
-        strncpy(prevmsg,msg,100);
-
-
-		char * temp=(char *) malloc(20 * sizeof(char));
-		if(memcmp(msg,"SEND",4)==0 || memcmp(msg,"send",4)==0){
-			char *start = &msg[5];
-  			char *end = &msg[7];
-			char *substr = (char *)calloc(1, end - start + 1);
-  			memcpy(substr, start, end - start);
-			sprintf(temp,"\t\t%s says %s\n",clientDetail->name, msg+7);
-			int index=atoi(substr);
-			if( index== clientDetail->index){
-				printf("Data can't be written to the same client\n");
-
-			}
-			else if(index<clientCount){
-				send_to_client(index,temp);
-				fflush(stdout);
-				printf(">>>Data Written to client %d : %s\n",index,msg);
-			}
-			else{
-				printf("client doesn't exist\n");
-			}
-		}
-
-		else if(memcmp(msg,"ALL",3)==0||memcmp(msg,"all",3)==0){
-			sprintf(temp,"\t\t%s\t: %s\n",clientDetail->name,msg+4);
-			fflush(stdout);
-			printf(">>>Data Sent to every client\n");
-			for(int i=0;i<clientCount;i++){
-				if(i!=clientDetail->index){
-					send_to_client(i,temp);
-				}
-			}
-		}
-		else {
-			fflush(stdout);
-			printf("command Not found: %s\n",msg);
-		}
-		// sleep(10);
-		pthread_mutex_unlock(&lock);
-    }
-}
-
-void* handleclient(){
-	while (cond)
+	char ch;
+	for (i = 0; i < s; i++)
 	{
-		if (strcmp(prevClient, clientdata) == 0)
-		{
-			continue;
-		}
-		parsed = parse(clientdata);
-		fflush(stdout);
-		printf("Connected Client %d %s\n", clientCount, parsed[0]);
-		strncpy(prevClient, clientdata, 100);
-
-		strcpy(Client[clientCount].name, parsed[0]);
-		Client[clientCount].key = atoi(parsed[1]);
-		Client[clientCount].index = clientCount;
-		pthread_create(&thread[clientCount], NULL, networking, (void *)&Client[clientCount]);
-		clientCount++;
+		ch = fgetc(fp);
+		buf[i] = ch;
+		if (ch == EOF)
+			return 1;
 	}
+	return 0;
 }
 
+int main()
+{
+	int sockfd, nBytes;
+	struct sockaddr_in addr_con;
+	int addrlen = sizeof(addr_con);
+	addr_con.sin_family = AF_INET;
+	addr_con.sin_port = htons(PORT_NO);
+	addr_con.sin_addr.s_addr = INADDR_ANY;
+	char net_buf[NET_BUF_SIZE];
+	FILE *fp;
 
+	sockfd = socket(AF_INET, SOCK_STREAM, IP_PROTOCOL);
 
-int main(){
-	fflush(stdout);
-	printf("Server Running\n");
+	if (sockfd < 0)
+		printf("\nfile descriptor not received!!\n");
 
-	key = 1000;
-	shmid = shmget(key,1024,0666|IPC_CREAT);
-	clientdata = (char*) shmat(shmid,(void*)0,0);
-	strncpy(clientdata,"nope",100);
-	strncpy(prevClient,clientdata,100);
-	signal(SIGINT, sigintHandler);
+	if (bind(sockfd, (struct sockaddr *)&addr_con, sizeof(addr_con)) < 0)
+		printf("\nBinding Failed!\n");
 
-	key_t key3 = 1003;
-	int shmid3 = shmget(key3, 1024, 0666 | IPC_CREAT);
-	arr = shmat(shmid3, (void *)0, 0);
+	while (1)
+	{
+		printf("Waiting for file name...\n");
 
-	if (pthread_mutex_init(&lock, NULL) != 0)
-    {
-        printf("\n mutex init has failed\n");
-        return 1;
-    }
-	pthread_t th;
-	pthread_create(&th, NULL, handleclient, NULL);
+		clearBuf(net_buf);
 
-	char *temp = (char *)malloc(sizeof(char) * 100);
-	while(1){
-		fgets(temp, 100, stdin);
-		if (memcmp(temp, "show", 4) == 0 || memcmp(temp, "SHOW", 4) == 0)
+		nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
+
+		int file = open(net_buf, O_RDONLY);
+		printf("\nFile Requested by Client: %s\n", net_buf);
+
+		if (fp == NULL)
+			printf("File open failed!\n");
+		else
 		{
-			show();
-		}
-		else if (memcmp(temp, "exit", 4) == 0 || memcmp(temp, "EXIT", 4) == 0){
-			sigintHandler(0);
+			printf("File Successfully Found!\n");
+			struct stat obj;
+			stat(net_buf, &obj);
+			int file_size = obj.st_size;
+			send(sockfd, &file_size, sizeof(int), 0);
+			sendfile(sockfd, file, NULL, file_size);
+
+			// copyContents(fp, net_buf, NET_BUF_SIZE);
+
+			// sendto(sockfd, net_buf, NET_BUF_SIZE,  sendrecvflag,  (struct sockaddr *)&addr_con, addrlen);
+
+			clearBuf(net_buf);
+
+			// fclose(fp);
 		}
 	}
+	return 0;
 }
