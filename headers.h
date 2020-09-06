@@ -9,3 +9,5 @@
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 #include <fcntl.h>
+#include <stdbool.h>
+#include <pthread.h>

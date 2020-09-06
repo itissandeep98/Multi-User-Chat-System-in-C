@@ -1,85 +1,102 @@
 #include "headers.h"
 
-#define IP_PROTOCOL 0
-#define PORT_NO 15050
-#define NET_BUF_SIZE 32
-#define sendrecvflag 0
-#define nofile "File Not Found!"
+#define SERVER_PORT 2001
+#define IP_ADDRESS "127.0.0.1" // localhost
 
-void clearBuf(char *b)
-{
-	int i;
-	for (i = 0; i < NET_BUF_SIZE; i++)
-		b[i] = '\0';
-}
+void *ConnectionHandler(void *socket_desc);
+bool SendFileOverSocket(int socket_desc, char *file_name);
 
-int copyContents(FILE *fp, char *buf, int s)
+int main(int argc, char **argv)
 {
-	int i, len;
-	if (fp == NULL)
+	int socket_desc, socket_client, *new_sock, c = sizeof(struct sockaddr_in);
+
+	struct sockaddr_in server, client;
+
+	socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+
+	if (socket_desc == -1)
 	{
-		strcpy(buf, nofile);
-		len = strlen(nofile);
-		buf[len] = EOF;
+		perror("Could not create socket");
 		return 1;
 	}
 
-	char ch;
-	for (i = 0; i < s; i++)
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = inet_addr(IP_ADDRESS);
+	server.sin_port = htons(SERVER_PORT);
+
+	if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
 	{
-		ch = fgetc(fp);
-		buf[i] = ch;
-		if (ch == EOF)
-			return 1;
+		perror("Bind failed");
+		return 1;
 	}
+
+	listen(socket_desc, 3);
+
+	if (socket_client = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c))
+	{
+		// pthread_t sniffer_thread;
+		printf("\nconnected\n");
+		new_sock = malloc(1);
+		*new_sock = socket_client;
+		// pthread_create(&sniffer_thread, NULL, ConnectionHandler, (void *)new_sock);
+		// pthread_join(sniffer_thread, NULL);
+		while (1)
+		{
+			ConnectionHandler(new_sock);
+		}
+	}
+
+	if (socket_client < 0)
+	{
+		perror("Accept failed");
+		return 1;
+	}
+
 	return 0;
 }
 
-int main()
+void *ConnectionHandler(void *socket_desc)
 {
-	int sockfd, nBytes;
-	struct sockaddr_in addr_con;
-	int addrlen = sizeof(addr_con);
-	addr_con.sin_family = AF_INET;
-	addr_con.sin_port = htons(PORT_NO);
-	addr_con.sin_addr.s_addr = INADDR_ANY;
-	char net_buf[NET_BUF_SIZE];
-	FILE *fp;
+	int socket = *(int *)socket_desc;
+	char server_response[BUFSIZ], client_request[BUFSIZ], file_name[BUFSIZ];
 
-	sockfd = socket(AF_INET, SOCK_DGRAM, IP_PROTOCOL);
+	recv(socket, client_request, BUFSIZ, 0);
+	strcpy(file_name, client_request);
 
-	if (sockfd < 0)
-		perror("\nfile descriptor not received!!");
+	char location[BUFSIZ];
+	strcpy(location, "server-files/");
+	strcat(location, file_name);
 
-	if (bind(sockfd, (struct sockaddr *)&addr_con, sizeof(addr_con)) < 0)
-		perror("\nBinding Failed!");
-
-	while (1)
+	FILE *fp = fopen(location, "r");
+	if (fp != NULL)
 	{
-		printf("\nWaiting for file name...\n");
-
-		clearBuf(net_buf);
-
-		nBytes = recvfrom(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, &addrlen);
-
-		fp = fopen(net_buf, "r");
-		printf("\nFile Requested by Client: %s\n", net_buf);
-
-		if (fp == NULL)
-			perror("\nFile open failed!");
-		else
-		{
-			printf("\nFile Successfully Found!\n");
-		}
-
-		copyContents(fp, net_buf, NET_BUF_SIZE);
-
-		sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
-
-		clearBuf(net_buf);
-
-		if (fp != NULL)
-			fclose(fp);
+		printf("\nfile found\n ");
+		strcpy(server_response, "OK");
+		write(socket, server_response, strlen(server_response));
+		SendFileOverSocket(socket, location);
 	}
+	else
+	{
+		perror("\nfile Not found ");
+		strcpy(server_response, "NO");
+		write(socket, server_response, strlen(server_response));
+	}
+
+	free(fp);
 	return 0;
+}
+
+bool SendFileOverSocket(int socket_desc, char *file_name)
+{
+
+	struct stat obj;
+	int file_desc, file_size;
+
+	stat(file_name, &obj);
+	file_desc = open(file_name, O_RDONLY);
+	file_size = obj.st_size;
+	send(socket_desc, &file_size, sizeof(int), 0);
+	sendfile(socket_desc, file_desc, NULL, file_size);
+
+	return true;
 }
