@@ -1,11 +1,4 @@
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include "headers.h"
 
 #define IP_PROTOCOL 0
 #define PORT_NO 15050
@@ -56,14 +49,14 @@ int main()
 	sockfd = socket(AF_INET, SOCK_DGRAM, IP_PROTOCOL);
 
 	if (sockfd < 0)
-		printf("\nfile descriptor not received!!\n");
+		perror("\nfile descriptor not received!!");
 
 	if (bind(sockfd, (struct sockaddr *)&addr_con, sizeof(addr_con)) < 0)
-		printf("\nBinding Failed!\n");
+		perror("\nBinding Failed!");
 
 	while (1)
 	{
-		printf("Waiting for file name...\n");
+		printf("\nWaiting for file name...\n");
 
 		clearBuf(net_buf);
 
@@ -73,19 +66,20 @@ int main()
 		printf("\nFile Requested by Client: %s\n", net_buf);
 
 		if (fp == NULL)
-			printf("File open failed!\n");
+			perror("\nFile open failed!");
 		else
 		{
-			printf("File Successfully Found!\n");
-
-			copyContents(fp, net_buf, NET_BUF_SIZE);
-
-			sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
-
-			clearBuf(net_buf);
-
-			fclose(fp);
+			printf("\nFile Successfully Found!\n");
 		}
+
+		copyContents(fp, net_buf, NET_BUF_SIZE);
+
+		sendto(sockfd, net_buf, NET_BUF_SIZE, sendrecvflag, (struct sockaddr *)&addr_con, addrlen);
+
+		clearBuf(net_buf);
+
+		if (fp != NULL)
+			fclose(fp);
 	}
 	return 0;
 }
