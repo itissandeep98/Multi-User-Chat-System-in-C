@@ -11,3 +11,4 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <signal.h>
