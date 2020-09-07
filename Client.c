@@ -39,7 +39,7 @@ int main(int argc, char **argv)
 	}
 	while (1)
 	{
-		printf("\nPlease enter file name to search:\n");
+		printf("\nPlease enter file name to search: ");
 		scanf("%s", filename);
 		if (strcmp(filename, "exit") == 0 || strcmp(filename, "quit") == 0 || strcmp(filename, "q") == 0)
 		{
@@ -56,10 +56,14 @@ int main(int argc, char **argv)
 		{
 			recv(socket_desc, &file_size, sizeof(int), 0);
 			data = malloc(file_size);
-			file_desc = open(filename, O_CREAT | O_EXCL | O_WRONLY, 0666);
+			char location[BUFSIZ];
+			strcpy(location, "client-files/");
+			strcat(location, filename);
+			file_desc = open(location, O_CREAT | O_EXCL | O_WRONLY, 0666);
 			recv(socket_desc, data, file_size, 0);
 			write(file_desc, data, file_size);
 			close(file_desc);
+			printf("\nFile Received\n");
 		}
 		else
 		{
