@@ -13,7 +13,7 @@ void sigintHandler(int sig_num) // function to handle smooth closing of the sock
 	fflush(stdout);
 	printf("!!!!Closing socket!!!!\n");
 	char msg[] = "exit";
-	write(socket_desc, msg, strlen(msg)); // sending info to server that client is exiting
+	// write(socket_desc, msg, strlen(msg)); // sending info to server that client is exiting
 	close(socket_desc);
 	exit(0);
 }
