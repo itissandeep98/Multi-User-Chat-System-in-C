@@ -1,222 +1,123 @@
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<pthread.h>
-#include<ctype.h>
-#include <sys/types.h>
-#include<signal.h>
+#include "headers.h"
 
-key_t key;
+#define SERVER_PORT 9890
+#define SERVER_FILES "server-files/"
 
-int shmid ;
+int socket_desc, socket_client, *new_sock, c = sizeof(struct sockaddr_in);
 
-char *clientdata;
-char prevClient[100]; 
-char** parsed;
-
-int ind=0;
-
-int clientCount = 0;
-pthread_mutex_t lock;
-
-pthread_t thread[1024];
-
-int cond=1;
-
-typedef struct
+void sigintHandler(int sig_num) // function to handle smooth closing of the socket
 {
-	char *msglist[20];
-} msg;
-volatile msg *arr;
-struct client{
-	char name[20];
-	int key;
-	int index;
-};
-
-struct client Client[100];
-
-void enqueue(char *msg)
-{
-	ind = ind % 20;
-	arr->msglist[ind++] = msg;
-}
-
-void show()
-{
-	int j = 0;
-	printf("------------------------------------\n");
-	while (j < ind)
-	{
-		printf("%d: %s\n", j, arr->msglist[j]);
-		j++;
-	}
-	printf("------------------------------------\n");
-}
-void sigintHandler(int sig_num){
 	fflush(stdout);
-	printf("exiting\n");
-	cond=0;
-	shmdt(clientdata);
-	shmctl(shmid,IPC_RMID,NULL);
-	for(int i = 0 ; i < clientCount ; i ++)
-		pthread_join(thread[i],NULL);
-
-	pthread_mutex_destroy(&lock);
-
+	printf("!!!!Closing socket!!!!\n");
+	close(socket_desc);
 	exit(0);
-
 }
 
-char **parse(char* input){
-    char** arr = (char**) malloc(sizeof(char*)*100);
-    for(int i=0; i<100; ++i){
-        arr[i]= (char*) malloc(sizeof(char)*100);
-    }
-    int i=0,j=0,k=0;
-    while(*(input+i) !='\0'){
-        if(*(input+i)!=' '){
-            arr[j][k]=input[i];
-            k+=1;
-        }
-        else if(*(input+i)==' ' && isspace(*(input+i+1))==0){
-            j+=1;
-            k=0;
-        }
-        i+=1;
-    }
-    arr[j+1]=NULL;
-    return arr;
-}
+int HandleConn(void *socket_desc)
+{
+	int socket = *(int *)socket_desc;
+	char server_response[BUFSIZ], file_name[BUFSIZ];
+	struct stat obj;
+	int file_desc, file_size;
 
-void send_to_client(int index,char * msg){
-	int shmid_receiver=shmget((key_t)Client[index].key+1,1024,0666|IPC_CREAT);
-	char * data_to_send=(char*) shmat(shmid_receiver,(void*)0,0);
-	strncpy(data_to_send,msg,100);
-}
+	// Recieve File name from the connected client
+	recv(socket, file_name, BUFSIZ, 0);
 
-void * networking(void * ClientDetail){
-	struct client* clientDetail = (struct client*) ClientDetail;
-
-	key_t key1=clientDetail->key;
-	int shmid1 = shmget(key1,1024,0666|IPC_CREAT);
-	char* msg=(char*) shmat(shmid1,(void*)0,0);
-
-	char prevmsg[100];
-
-	strncpy(prevmsg,msg,100);
-
-	while(cond){
-        if(strcmp(prevmsg,msg)==0){
-            continue;
-        }
-		pthread_mutex_lock(&lock);
-		enqueue(msg);
-		
-
-		fflush(stdout);
-	    printf(">>>Data read from Client %d: %s\n",clientDetail->index,msg);
-        strncpy(prevmsg,msg,100);
-
-
-		char * temp=(char *) malloc(20 * sizeof(char));
-		if(memcmp(msg,"SEND",4)==0 || memcmp(msg,"send",4)==0){
-			char *start = &msg[5];
-  			char *end = &msg[7];
-			char *substr = (char *)calloc(1, end - start + 1);
-  			memcpy(substr, start, end - start);
-			sprintf(temp,"\t\t%s says %s\n",clientDetail->name, msg+7);
-			int index=atoi(substr);
-			if( index== clientDetail->index){
-				printf("Data can't be written to the same client\n");
-
-			}
-			else if(index<clientCount){
-				send_to_client(index,temp);
-				fflush(stdout);
-				printf(">>>Data Written to client %d : %s\n",index,msg);
-			}
-			else{
-				printf("client doesn't exist\n");
-			}
-		}
-
-		else if(memcmp(msg,"ALL",3)==0||memcmp(msg,"all",3)==0){
-			sprintf(temp,"\t\t%s\t: %s\n",clientDetail->name,msg+4);
-			fflush(stdout);
-			printf(">>>Data Sent to every client\n");
-			for(int i=0;i<clientCount;i++){
-				if(i!=clientDetail->index){
-					send_to_client(i,temp);
-				}
-			}
-		}
-		else {
-			fflush(stdout);
-			printf("command Not found: %s\n",msg);
-		}
-		// sleep(10);
-		pthread_mutex_unlock(&lock);
-    }
-}
-
-void* handleclient(){
-	while (cond)
+	if (strcmp(file_name, "exit") == 0 || strcmp(file_name, "") == 0) // compare the data recieved from client if it wants to exit
 	{
-		if (strcmp(prevClient, clientdata) == 0)
-		{
-			continue;
-		}
-		parsed = parse(clientdata);
-		fflush(stdout);
-		printf("Connected Client %d %s\n", clientCount, parsed[0]);
-		strncpy(prevClient, clientdata, 100);
+		printf("\nClient Disconnected\n");
+		return 0;
+	}
 
-		strcpy(Client[clientCount].name, parsed[0]);
-		Client[clientCount].key = atoi(parsed[1]);
-		Client[clientCount].index = clientCount;
-		pthread_create(&thread[clientCount], NULL, networking, (void *)&Client[clientCount]);
-		clientCount++;
+	// since server files are located inside its directory so concatinating that location with the file name
+	char location[BUFSIZ];
+	strcpy(location, SERVER_FILES);
+	strcat(location, file_name);
+
+	strcpy(file_name, "");
+
+	FILE *fp = fopen(location, "r");
+	if (fp != NULL) // checking if the file exists or not
+	{
+		printf("\nFile Found: %s\n", location);
+
+		// sending a response to client that file exists on server
+		strcpy(server_response, "OK");
+		write(socket, server_response, strlen(server_response));
+
+		// Obtaining the file size and sending to client to excepect this size of file
+		stat(location, &obj);
+		file_desc = open(location, O_RDONLY);
+		file_size = obj.st_size;
+		send(socket, &file_size, sizeof(int), 0);
+
+		// Sending the file
+		sendfile(socket, file_desc, NULL, file_size);
+
+		printf("\nFile Sent\n ");
+
+		free(fp);
+		return 1;
+	}
+	else
+	{
+		// Showing error if the file was not found
+		perror("\nFile Not found\n");
+		strcpy(server_response, "NO");
+		// sending a NO response to the client
+		write(socket, server_response, strlen(server_response));
+		return 1;
 	}
 }
 
-
-
-int main(){
-	fflush(stdout);
-	printf("Server Running\n");
-
-	key = 1000;
-	shmid = shmget(key,1024,0666|IPC_CREAT);
-	clientdata = (char*) shmat(shmid,(void*)0,0);
-	strncpy(clientdata,"nope",100);
-	strncpy(prevClient,clientdata,100);
+int main()
+{
+	// setting a system call on the keyboard interrupts so that the socket closes safely in any situation
 	signal(SIGINT, sigintHandler);
 
-	key_t key3 = 1003;
-	int shmid3 = shmget(key3, 1024, 0666 | IPC_CREAT);
-	arr = shmat(shmid3, (void *)0, 0);
+	struct sockaddr_in server, client;
+	// creating a socket
+	socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+	
+	// setting the propery of reusability on the socket port to get rid of the bind error
+	int a = 1;
+	setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR, &a, sizeof(int));
 
-	if (pthread_mutex_init(&lock, NULL) != 0)
-    {
-        printf("\n mutex init has failed\n");
-        return 1;
-    }
-	pthread_t th;
-	pthread_create(&th, NULL, handleclient, NULL);
-
-	char *temp = (char *)malloc(sizeof(char) * 100);
-	while(1){
-		fgets(temp, 100, stdin);
-		if (memcmp(temp, "show", 4) == 0 || memcmp(temp, "SHOW", 4) == 0)
-		{
-			show();
-		}
-		else if (memcmp(temp, "exit", 4) == 0 || memcmp(temp, "EXIT", 4) == 0){
-			sigintHandler(0);
-		}
+	if (socket_desc == -1)
+	{
+		perror("\nCould not create socket");
+		return 1;
 	}
+
+	// setting socket properties
+	server.sin_family = AF_INET;		  // to use ipv4 mechanism
+	server.sin_addr.s_addr = INADDR_ANY;  // to accepts client from any ip address
+	server.sin_port = htons(SERVER_PORT); // assigning port
+
+	if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0) // binding the socket
+	{
+		perror("\nBind failed");
+		return 1;
+	}
+
+	// listening on port
+	listen(socket_desc, 3);
+
+	while (socket_client = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)) // loop runs until there is a new client
+	{
+		printf("\nClient Connected\n");
+		new_sock = malloc(1);
+		*new_sock = socket_client;
+
+		while (HandleConn(new_sock)); // runs until the client exits
+		close(socket_client);
+	}
+
+	if (socket_client < 0)
+	{
+		perror("\nAccept failed");
+		return 1;
+	}
+
+	return 0;
 }
